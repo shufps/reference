@@ -1,3 +1,8 @@
+Changed Troika for SIMD calculations. Calculates 32 or 64 hashs in parallel.
+
+
+Original README:
+
 # Troika
 
 This repository contains the reference implementation of the Troika hash
