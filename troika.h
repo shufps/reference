@@ -25,11 +25,27 @@
 #ifndef TROIKA_H
 #define TROIKA_H
 
-typedef unsigned char Trit; /* Stores 0,1,2 in a byte. */
+#include <stdint.h>
+
+#define SIMD_SIZE 64
+
+// simd-datetype for calculations
+#if SIMD_SIZE == 64
+#define SIMD_T	uint64_t
+#endif
+
+typedef struct {
+	SIMD_T hi;
+	SIMD_T lo;
+} Trit;
+
+//typedef unsigned char Trit; /* Stores 0,1,2 in a byte. */
 typedef unsigned char Tryte; /* Stores 0,...,26 in a byte. */
 
 #define NUM_ROUNDS 24
 #define TROIKA_RATE 243
+
+
 
 /*
  * Evaluates the Troika hash function on the input.
@@ -62,8 +78,8 @@ void TroikaVarRounds(Trit *out, unsigned long long outlen,
  *
  * @param state Pointer to the state which is printed.
  */
-void PrintTroikaSlice(Trit *state, int slice);
-void PrintTroikaState(Trit *state);
+void PrintTroikaSlice(uint8_t *state, int slice);
+void PrintTroikaState(uint8_t *state);
 
 void SubTrytes(Trit *state);
 void ShiftRows(Trit *state);
