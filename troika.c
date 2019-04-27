@@ -39,12 +39,15 @@
 
 //#define PADDING 0x1
 #if SIMD_SIZE==64
-const Trit PADDING={0xffffffffffffffffll, 0x0000000000000000ll};
+const Trit PADDING={0xffffffffffffffffll, 0xffffffffffffffffll};
 #elif SIMD_SIZE==32
-const Trit PADDING={0xffffffff, 0x00000000};
+const Trit PADDING={0xffffffff, 0xffffffff};
 #endif
 
 static Trit simd_round_constants[NUM_ROUNDS][COLUMNS*SLICES];
+
+//uint16_t map[729];
+uint16_t perm[729];
 
 static const uint8_t round_constants[NUM_ROUNDS][COLUMNS*SLICES] = {
  {2, 2, 2, 2, 1, 2, 0, 1, 0, 1, 1, 0, 2, 0, 1, 0, 1, 1, 0, 0, 1, 2, 1, 1, 1, 0, 0, 2, 0, 2, 1, 0, 2, 2, 2, 1, 0, 2, 2, 0, 0, 1, 2, 2, 1, 0, 1, 0, 1, 2, 2, 2, 0, 1, 2, 2, 1, 1, 2, 1, 1, 2, 0, 2, 0, 2, 0, 0, 0, 0, 2, 1, 1, 2, 1, 0, 1, 0, 2, 1, 1, 0, 0, 2, 2, 2, 2, 0, 1, 1, 2, 1, 2, 2, 0, 1, 2, 2, 2, 0, 1, 0, 2, 2, 0, 2, 1, 1, 2, 1, 2, 1, 0, 0, 2, 1, 0, 0, 1, 2, 2, 1, 1, 1, 0, 1, 0, 2, 2, 0, 2, 2, 2, 0, 2, 2, 1, 0, 0, 0, 2, 1, 0, 0, 1, 1, 1, 2, 2, 1, 0, 1, 0, 1, 1, 1, 1, 0, 1, 2, 2, 1, 0, 1, 0, 2, 0, 1, 2, 0, 1, 2, 2, 2, 2, 1, 0, 0, 0, 0, 2, 1, 0, 2, 1, 1, 2, 0, 2, 1, 0, 0, 0, 1, 0, 2, 1, 2, 0, 1, 2, 1, 0, 2, 0, 2, 1, 0, 0, 1, 2, 0, 2, 2, 2, 0, 1, 0, 2, 0, 1, 0, 2, 1, 2, 1, 2, 2, 1, 1, 2, 0, 2, 2, 1, 0, 0, 2, 0, 2, 1, 0, 1},
@@ -114,13 +117,12 @@ void PrintTroikaState(uint8_t *state)
     }
 }
 
+#ifdef DEBUG
+#define inline
+#endif
 
-uint8_t simd_exportValue(int nr, Trit* t) {
-	Trit tmp;
-	tmp.lo = ((t->hi) >> nr) & 0x1;
-	tmp.hi = ((~(t->lo ^ t->hi)) >> nr) & 0x1;
-	uint8_t val = tmp.lo | (tmp.hi << 1);
-	return val;
+inline uint8_t simd_exportValue(int nr, Trit* t) {
+	return ((t->lo >> nr) & 0x1) | ((((t->lo ^ t->hi) >> nr) & 0x1) << 1);
 }
 
 void simd_exportState(int nr, Trit* state, uint8_t* trits) {
@@ -144,86 +146,55 @@ void printState(int nr, Trit* state, int len) {
 	printf("\n");
 }
 
-
-Trit* simd_set_zero(Trit* a) {
-#if SIMD_SIZE==64
-	a->hi = 0x0000000000000000;
-	a->lo = 0xffffffffffffffff;
-#elif SIMD_SIZE==32
-	a->hi = 0x00000000;
-	a->lo = 0xffffffff;
-#endif
-	return a;
+inline void simd_expandTrit(uint8_t t, Trit* dst) {
+	dst->lo = (t & 0x1) ? ~0ll : 0ll;
+	dst->hi = (t & 0x2) ? ~0ll : 0ll;
+	dst->hi = dst->lo ^ dst->hi;
 }
 
-Trit* simd_add_mod3(Trit* a, Trit* b, Trit* c) {
+inline void simd_set_zero(Trit* a) {
+	a->lo = 0ll;
+	a->hi = 0ll;
+}
+
+inline Trit* simd_add_mod3(Trit* a, Trit* b, Trit* c) {
 	Trit tmp;
-	tmp.hi = ((a->hi & b->lo)) | (~(a->lo ^ b->hi) & (~a->hi & ~b->lo));
-	tmp.lo = ((a->lo & b->lo)) | (~(a->hi ^ a->lo) & (b->hi)) | (~(b->hi ^ b->lo) & (a->hi));
+	tmp.hi = ((a->hi ^ b->hi)) | ((a->hi ^ a->lo ^ b->lo));
+	tmp.lo = ((b->lo & ~a->hi)) | ((a->lo ^ b->hi) & (a->hi & ~b->lo));
 	c->hi = tmp.hi;
 	c->lo = tmp.lo;
 	return c;
 }
 
-void simd_sbox(Trit* a2, Trit* a1, Trit* a0) {
+inline void simd_sbox(Trit* a, Trit* b, Trit* c) {
 	Trit d2, d1, d0;
-	d2.hi = (~(a2->hi ^ a0->lo) & (a1->hi)) | ((a2->hi ^ a1->hi) & (~a1->lo & ~a0->lo)) | ((a2->hi ^ a1->hi ^ a1->lo) & (a0->hi & ~a2->lo)) | (~(a0->hi ^ a0->lo) & (a2->lo & a1->lo));
-	d2.lo = (~(a2->hi ^ a1->lo) & (a0->lo)) | ((a2->hi ^ a0->lo) & (a1->lo));
-	d1.hi = (~(a2->hi ^ a2->lo) & (a1->lo)) | ((a2->lo ^ a1->lo) & (a0->lo & ~a2->hi)) | ((a2->hi ^ a1->hi ^ a0->hi) & (~a2->lo & ~a1->lo & ~a0->lo));
-	d1.lo = ((a2->hi & a0->lo)) | (~(a2->lo ^ a1->hi ^ a0->hi) & (~a2->hi & ~a1->lo & ~a0->lo)) | ((a1->lo ^ a0->lo) & (a2->hi));
-	d0.hi = ((a2->hi & a0->hi)) | ((a2->hi ^ a1->lo) & (a0->hi)) | (~(a2->lo ^ a1->hi ^ a0->lo) & (~a2->hi & ~a1->lo & ~a0->hi));
-	d0.lo = ((a1->lo & a0->lo)) | ((a2->lo ^ a1->hi ^ a0->hi) & (~a2->hi & ~a1->lo & ~a0->lo)) | ((a2->hi ^ a1->lo) & (a0->lo));
-    *a2 = d2;
-    *a1 = d1;
-    *a0 = d0;
+	d2.hi = ((b->hi & c->hi)) | ((c->hi & ~a->lo)) | ((a->lo ^ c->hi) & (b->hi));
+	d2.lo = ((a->lo ^ b->lo) & (b->hi & c->hi)) | ((c->hi ^ c->lo) & (~a->hi & ~b->hi)) | ((a->lo ^ b->hi ^ b->lo ^ c->hi) & (a->hi & c->lo)) | ((a->lo ^ c->hi) & (b->lo));
+	d1.hi = (~(a->hi ^ b->lo ^ c->lo) & (~a->lo)) | ((a->hi ^ b->lo ^ c->hi ^ c->lo) & (~a->lo)) | ((b->hi ^ c->hi) & (~a->lo)) | (~(a->lo ^ c->hi) & (b->hi));
+	d1.lo = ((a->hi ^ a->lo) & (~b->hi)) | ((a->hi ^ b->hi) & (~a->lo & ~c->hi)) | ((a->lo ^ b->lo ^ c->lo) & (a->hi & b->hi & c->hi));
+	d0.hi = ((a->hi ^ b->lo ^ c->lo) & (c->hi)) | ((a->hi ^ a->lo ^ b->lo ^ c->lo) & (c->hi)) | ((b->hi ^ c->hi) & (~a->lo));
+	d0.lo = ((a->lo & c->lo)) | (~(a->hi ^ b->lo ^ c->hi) & (b->hi & ~a->lo & ~c->lo)) | ((c->lo & ~b->hi));
+    *a = d2;
+    *b = d1;
+    *c = d0;
 }
 
 void SubTrytes(Trit *state)
 {
+	//return;
     int sbox_idx;
     for (sbox_idx = 0; sbox_idx < NUM_SBOXES; ++sbox_idx) {
     	simd_sbox(&state[3*sbox_idx], &state[3*sbox_idx+1], &state[3*sbox_idx+2]);
     }
 }
 
-void ShiftRows(Trit *state)
+void ShiftRowsAndLanes(Trit *state)
 {
-    int slice, row, col, old_idx, new_idx;
-
-    Trit new_state[STATESIZE];
-
-    for (slice = 0; slice < SLICES; ++slice) {
-        for (row = 0; row < ROWS; ++row) {
-            for (col = 0; col < COLUMNS; ++col) {
-                old_idx = SLICESIZE*slice + COLUMNS*row + col;
-                new_idx = SLICESIZE*slice + COLUMNS*row + 
-                          (col + 3*shift_rows_param[row]) % COLUMNS;
-                new_state[new_idx] = state[old_idx];
-            }
-        }
+    Trit newstate[729];
+    for (int i=0;i<729;i++) {
+		newstate[i] = state[perm[i]];
     }
-
-    memcpy(state, new_state, sizeof(new_state));
-}
-
-void ShiftLanes(Trit *state)
-{
-    int slice, row, col, old_idx, new_idx, new_slice;
-
-    Trit new_state[STATESIZE];
-
-    for (slice = 0; slice < SLICES; ++slice) {
-        for (row = 0; row < ROWS; ++row) {
-            for (col = 0; col < COLUMNS; ++col) {
-                old_idx = SLICESIZE*slice + COLUMNS*row + col;
-                new_slice = (slice + shift_lanes_param[col + COLUMNS*row]) % SLICES;
-                new_idx = SLICESIZE*(new_slice) + COLUMNS*row + col;
-                new_state[new_idx] = state[old_idx];
-            }
-        }
-    }
-
-    memcpy(state, new_state, sizeof(new_state));
+    memcpy(state, newstate, sizeof(newstate));
 }
 
 void AddColumnParity(Trit *state)
@@ -236,7 +207,6 @@ void AddColumnParity(Trit *state)
     for (slice = 0; slice < SLICES; ++slice) {
         for (col = 0; col < COLUMNS; ++col) {
         	Trit col_sum_mod3;
-        	simd_set_zero(&col_sum_mod3);
         	col_sum_mod3 = state[SLICESIZE*slice + col];
 			simd_add_mod3(&state[SLICESIZE*slice + COLUMNS*1 + col], &col_sum_mod3, &col_sum_mod3);
 			simd_add_mod3(&state[SLICESIZE*slice + COLUMNS*2 + col], &col_sum_mod3, &col_sum_mod3);
@@ -259,38 +229,39 @@ void AddColumnParity(Trit *state)
 void AddRoundConstant(Trit *state, int round)
 {
     int slice, col, idx;
-    //d();
     for (slice = 0; slice < SLICES; ++slice) {
         for (col = 0; col < COLUMNS; ++col) {
             idx = SLICESIZE*slice + col;
 			simd_add_mod3(&state[idx], &simd_round_constants[round][slice*COLUMNS + col], &state[idx]);
-//			printf("%d %d %d %016lx %016lx\n", slice*COLUMNS + col, idx, round_constants[round][slice*COLUMNS + col],simd_round_constants[round][slice*COLUMNS + col].lo, simd_round_constants[round][slice*COLUMNS + col].hi);
         }
     }    
 }
 
-Trit* simd_expandTrit(uint8_t t, Trit* dst) {
-	Trit tmp={0};
-	if (t & 0x1) {
-#if SIMD_SIZE==64
-		tmp.lo = 0xffffffffffffffff;
-#elif SIMD_SIZE==32
-		tmp.lo = 0xffffffff;
-#endif
-	}
-	if (t & 0x2) {
-#if SIMD_SIZE==64
-		tmp.hi = 0xffffffffffffffff;
-#elif SIMD_SIZE==32
-		tmp.hi = 0xffffffff;
-#endif
-	}
-	dst->lo = ~(tmp.lo ^ tmp.hi);
-	dst->hi = tmp.lo;
-	return dst;
-}
 
-void CalcRoundConstants() {
+void initConstants() {
+	uint16_t tmp[729];
+    for (int slice = 0; slice < SLICES; ++slice) {
+        for (int row = 0; row < ROWS; ++row) {
+            for (int col = 0; col < COLUMNS; ++col) {
+                int old_idx = SLICESIZE*slice + COLUMNS*row + col;
+                int new_idx = SLICESIZE*slice + COLUMNS*row +
+                          (col + 3*shift_rows_param[row]) % COLUMNS;
+                tmp[new_idx] = old_idx;
+            }
+        }
+    }
+
+	for (int slice = 0; slice < SLICES; ++slice) {
+		for (int row = 0; row < ROWS; ++row) {
+			for (int col = 0; col < COLUMNS; ++col) {
+				int old_idx = SLICESIZE*slice + COLUMNS*row + col;
+				int new_slice = (slice + shift_lanes_param[col + COLUMNS*row]) % SLICES;
+				int new_idx = SLICESIZE*(new_slice) + COLUMNS*row + col;
+				perm[new_idx] = tmp[old_idx];
+			}
+		}
+	}
+
 	for (int n=0;n<24;n++) {
 		for (int i=0;i<243;i++) {
 			uint8_t val = round_constants[n][i];
@@ -307,11 +278,15 @@ void TroikaPermutation(Trit *state, unsigned long long num_rounds)
 
     //PrintTroikaState(state);
     for (round = 0; round < num_rounds; round++) {
+//        printState(0, state, 729);
         SubTrytes(state);
-        ShiftRows(state);
-        ShiftLanes(state);
+//        printState(0, state, 729);
+        ShiftRowsAndLanes(state);
+//        printState(0, state, 729);
         AddColumnParity(state);
+//        printState(0, state, 729);
         AddRoundConstant(state, round);
+//        printState(0, state, 729);
     }
     //PrintTroikaState(state);
 }
@@ -391,22 +366,7 @@ void TroikaVarRounds(Trit *out, unsigned long long outlen,
 {
     Trit state[STATESIZE] __attribute__ ((aligned (16)));
 
-#if SIMD_SIZE==64
-/*    __int128_t zero = 0xffffffffffffffff0000000000000000ll;
-    __int128_t* pState = (__int128_t*) state;*/
-    for (int i=0;i<729;i++) {
-    	simd_set_zero(&state[i]);
-    	//*pState++ = zero;
-    }
-#elif SIMD_SIZE==32
-    uint64_t zero = 0x00000000ffffffff;
-    uint64_t* pState = (uint64_t*) state;
-    for (int i=0;i<729;i++) {
-    	*pState++ = zero;
-    }
-#endif
-
-//    memset(state, 0, sizeof(state));
+    memset(state, 0, sizeof(state));
     TroikaAbsorb(state, TROIKA_RATE, in, inlen, num_rounds);
     TroikaSqueeze(out, outlen, TROIKA_RATE, state, num_rounds);
 }
@@ -424,9 +384,10 @@ void importStringToArray(const char* input, Trit* output) {
 
 
 int main() {
-	CalcRoundConstants();
+	initConstants();
 	Trit input[8019]={0};
 	Trit result[729]={0};
+
 
 	importStringToArray(testVector, input);
 	long s = get_microtime();
