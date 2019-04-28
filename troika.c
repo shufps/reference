@@ -39,15 +39,16 @@
 
 //#define PADDING 0x1
 #if SIMD_SIZE==64
-const Trit PADDING={0xffffffffffffffffll, 0xffffffffffffffffll};
+const Trit PADDING={~0ll, ~0ll};
 #elif SIMD_SIZE==32
-const Trit PADDING={0xffffffff, 0xffffffff};
+const Trit PADDING={~0, ~0};
 #endif
 
 static Trit simd_round_constants[NUM_ROUNDS][COLUMNS*SLICES];
 
-//uint16_t map[729];
 uint16_t perm[729];
+uint16_t plutLeft[243];
+uint16_t plutRight[243];
 
 static const uint8_t round_constants[NUM_ROUNDS][COLUMNS*SLICES] = {
  {2, 2, 2, 2, 1, 2, 0, 1, 0, 1, 1, 0, 2, 0, 1, 0, 1, 1, 0, 0, 1, 2, 1, 1, 1, 0, 0, 2, 0, 2, 1, 0, 2, 2, 2, 1, 0, 2, 2, 0, 0, 1, 2, 2, 1, 0, 1, 0, 1, 2, 2, 2, 0, 1, 2, 2, 1, 1, 2, 1, 1, 2, 0, 2, 0, 2, 0, 0, 0, 0, 2, 1, 1, 2, 1, 0, 1, 0, 2, 1, 1, 0, 0, 2, 2, 2, 2, 0, 1, 1, 2, 1, 2, 2, 0, 1, 2, 2, 2, 0, 1, 0, 2, 2, 0, 2, 1, 1, 2, 1, 2, 1, 0, 0, 2, 1, 0, 0, 1, 2, 2, 1, 1, 1, 0, 1, 0, 2, 2, 0, 2, 2, 2, 0, 2, 2, 1, 0, 0, 0, 2, 1, 0, 0, 1, 1, 1, 2, 2, 1, 0, 1, 0, 1, 1, 1, 1, 0, 1, 2, 2, 1, 0, 1, 0, 2, 0, 1, 2, 0, 1, 2, 2, 2, 2, 1, 0, 0, 0, 0, 2, 1, 0, 2, 1, 1, 2, 0, 2, 1, 0, 0, 0, 1, 0, 2, 1, 2, 0, 1, 2, 1, 0, 2, 0, 2, 1, 0, 0, 1, 2, 0, 2, 2, 2, 0, 1, 0, 2, 0, 1, 0, 2, 1, 2, 1, 2, 2, 1, 1, 2, 0, 2, 2, 1, 0, 0, 2, 0, 2, 1, 0, 1},
@@ -181,10 +182,10 @@ inline void simd_sbox(Trit* a, Trit* b, Trit* c) {
 
 void SubTrytes(Trit *state)
 {
-	//return;
-    int sbox_idx;
-    for (sbox_idx = 0; sbox_idx < NUM_SBOXES; ++sbox_idx) {
-    	simd_sbox(&state[3*sbox_idx], &state[3*sbox_idx+1], &state[3*sbox_idx+2]);
+    for (int i=0;i<729;i+=9) {
+    	simd_sbox(&state[i], &state[i+1], &state[i+2]);
+    	simd_sbox(&state[i+3], &state[i+4], &state[i+5]);
+    	simd_sbox(&state[i+6], &state[i+7], &state[i+8]);
     }
 }
 
@@ -197,32 +198,40 @@ void ShiftRowsAndLanes(Trit *state)
     memcpy(state, newstate, sizeof(newstate));
 }
 
+
+
 void AddColumnParity(Trit *state)
 {
-    int slice, row, col, idx;
+    int slice,  col;
 
     Trit parity[SLICES * COLUMNS];
 
-    // First compute parity for each column
-    for (slice = 0; slice < SLICES; ++slice) {
-        for (col = 0; col < COLUMNS; ++col) {
-        	Trit col_sum_mod3;
-        	col_sum_mod3 = state[SLICESIZE*slice + col];
-			simd_add_mod3(&state[SLICESIZE*slice + COLUMNS*1 + col], &col_sum_mod3, &col_sum_mod3);
-			simd_add_mod3(&state[SLICESIZE*slice + COLUMNS*2 + col], &col_sum_mod3, &col_sum_mod3);
-            parity[COLUMNS*slice + col] = col_sum_mod3;
-        }
+    int pIdx = 0;
+    int sIdx = 0;
+    for (slice = 0;slice<SLICES;slice++) {
+    	for (col=0;col<COLUMNS;col++, pIdx++, sIdx++) {
+    		Trit col_sum_mod3;
+    		col_sum_mod3 = state[sIdx];
+    		simd_add_mod3(&state[sIdx + 9], &col_sum_mod3, &col_sum_mod3);
+    		simd_add_mod3(&state[sIdx + 18], &col_sum_mod3, &col_sum_mod3);
+    		parity[pIdx] = col_sum_mod3;
+    	}
+    	sIdx += 18;
     }
 
-    // Add parity 
+    pIdx = 0;
+    sIdx = 0;
+    // Add parity
     for (slice = 0; slice < SLICES; ++slice) {
-        for (row = 0; row < ROWS; ++row) {
-            for (col = 0; col < COLUMNS; ++col) {
-                idx = SLICESIZE*slice + COLUMNS*row + col;
-    			simd_add_mod3(&state[idx], &parity[(col - 1 + 9) % 9 + COLUMNS*slice], &state[idx]);
-    			simd_add_mod3(&state[idx], &parity[(col + 1) % 9 + COLUMNS*((slice + 1) % SLICES)], &state[idx]);
-            }
-        }
+		for (col = 0; col < COLUMNS; ++col, sIdx++, pIdx++) {
+			simd_add_mod3(&state[sIdx], &parity[plutLeft[pIdx]], &state[sIdx]);
+			simd_add_mod3(&state[sIdx], &parity[plutRight[pIdx]], &state[sIdx]);
+			simd_add_mod3(&state[sIdx+9], &parity[plutLeft[pIdx]], &state[sIdx+9]);
+			simd_add_mod3(&state[sIdx+9], &parity[plutRight[pIdx]], &state[sIdx+9]);
+			simd_add_mod3(&state[sIdx+18], &parity[plutLeft[pIdx]], &state[sIdx+18]);
+			simd_add_mod3(&state[sIdx+18], &parity[plutRight[pIdx]], &state[sIdx+18]);
+		}
+		sIdx+=18;
     }
 }
 
@@ -234,7 +243,7 @@ void AddRoundConstant(Trit *state, int round)
             idx = SLICESIZE*slice + col;
 			simd_add_mod3(&state[idx], &simd_round_constants[round][slice*COLUMNS + col], &state[idx]);
         }
-    }    
+    }
 }
 
 
@@ -262,6 +271,14 @@ void initConstants() {
 		}
 	}
 
+    for (int slice = 0; slice < SLICES; ++slice) {
+        for (int row = 0; row < ROWS; ++row) {
+            for (int col = 0; col < COLUMNS; ++col) {
+                plutLeft[COLUMNS*slice + col] = (col - 1 + 9) % 9 + COLUMNS*slice;
+                plutRight[COLUMNS*slice + col] = (col + 1) % 9 + COLUMNS*((slice + 1) % SLICES);
+            }
+        }
+    }
 	for (int n=0;n<24;n++) {
 		for (int i=0;i<243;i++) {
 			uint8_t val = round_constants[n][i];
