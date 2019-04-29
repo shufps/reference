@@ -26,11 +26,13 @@
 #define TROIKA_H
 
 #include <stdint.h>
-
-#define SIMD_SIZE 64
+#define SIMD_SIZE 128
 
 // simd-datetype for calculations
-#if SIMD_SIZE == 64
+#if SIMD_SIZE == 128
+#include <xmmintrin.h>
+#define SIMD_T	__m128i
+#elif SIMD_SIZE == 64
 #define SIMD_T	uint64_t
 #endif
 

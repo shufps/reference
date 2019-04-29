@@ -38,8 +38,10 @@
 #define NUM_SBOXES SLICES*ROWS*COLUMNS/3
 
 //#define PADDING 0x1
-#if SIMD_SIZE==64
-const Trit PADDING={~0ll, ~0ll};
+#if SIMD_SIZE==128
+const Trit PADDING={~0, ~0, ~0, ~0};
+#elif SIMD_SIZE==64
+const Trit PADDING={~0ul, ~0ul};
 #elif SIMD_SIZE==32
 const Trit PADDING={~0, ~0};
 #endif
@@ -123,7 +125,11 @@ void PrintTroikaState(uint8_t *state)
 #endif
 
 inline uint8_t simd_exportValue(int nr, Trit* t) {
+#if SIMD_SIZE!=128
 	return ((t->lo >> nr) & 0x1) | ((((t->lo ^ t->hi) >> nr) & 0x1) << 1);
+#else
+	return (uint8_t) (_mm_movepi64_pi64(((t->lo >> nr) & 0x1) | ((((t->lo ^ t->hi) >> nr) & 0x1) << 1))[0] & 0xff);
+#endif
 }
 
 void simd_exportState(int nr, Trit* state, uint8_t* trits) {
@@ -147,18 +153,29 @@ void printState(int nr, Trit* state, int len) {
 	printf("\n");
 }
 
-inline void simd_expandTrit(uint8_t t, Trit* dst) {
-	dst->lo = (t & 0x1) ? ~0ll : 0ll;
-	dst->hi = (t & 0x2) ? ~0ll : 0ll;
+static inline void simd_expandTrit(uint8_t t, Trit* dst) {
+#if SIMD_SIZE!=128
+	dst->lo = (t & 0x1) ? ~0ul : 0ul;
+	dst->hi = (t & 0x2) ? ~0ul : 0ul;
 	dst->hi = dst->lo ^ dst->hi;
+#else
+	dst->lo = (t & 0x1) ? _mm_set1_epi32(0xffffffff) : _mm_set1_epi32(0x00000000);
+	dst->hi = (t & 0x2) ? _mm_set1_epi32(0xffffffff) : _mm_set1_epi32(0x00000000);
+	dst->hi = dst->lo ^ dst->hi;
+#endif
 }
 
-inline void simd_set_zero(Trit* a) {
-	a->lo = 0ll;
-	a->hi = 0ll;
+static inline void simd_set_zero(Trit* a) {
+#if SIMD_SIZE != 128
+	a->lo = 0;
+	a->hi = 0;
+#else
+	a->lo = _mm_set1_epi32(0u);
+	a->hi = _mm_set1_epi32(0u);
+#endif
 }
 
-inline Trit* simd_add_mod3(Trit* a, Trit* b, Trit* c) {
+static inline Trit* simd_add_mod3(Trit* a, Trit* b, Trit* c) {
 	Trit tmp;
 	tmp.hi = ((a->hi ^ b->hi)) | ((a->hi ^ a->lo ^ b->lo));
 	tmp.lo = ((b->lo & ~a->hi)) | ((a->lo ^ b->hi) & (a->hi & ~b->lo));
@@ -167,7 +184,7 @@ inline Trit* simd_add_mod3(Trit* a, Trit* b, Trit* c) {
 	return c;
 }
 
-inline void simd_sbox(Trit* a, Trit* b, Trit* c) {
+static inline void simd_sbox(Trit* a, Trit* b, Trit* c) {
 	Trit d2, d1, d0;
 	d2.hi = ((b->hi & c->hi)) | ((c->hi & ~a->lo)) | ((a->lo ^ c->hi) & (b->hi));
 	d2.lo = ((a->lo ^ b->lo) & (b->hi & c->hi)) | ((c->hi ^ c->lo) & (~a->hi & ~b->hi)) | ((a->lo ^ b->hi ^ b->lo ^ c->hi) & (a->hi & c->lo)) | ((a->lo ^ c->hi) & (b->lo));
@@ -179,6 +196,7 @@ inline void simd_sbox(Trit* a, Trit* b, Trit* c) {
     *b = d1;
     *c = d0;
 }
+
 
 void SubTrytes(Trit *state)
 {
@@ -327,7 +345,7 @@ static void TroikaAbsorb(Trit *state, unsigned int rate, const Trit *message,
     // Pad last block
     Trit last_block[rate];
 //    memset(last_block, 0, rate);
-    for (int i=0;i<rate;i++) {
+    for (unsigned int i=0;i<rate;i++) {
     	simd_set_zero(&last_block[i]);
     	//*pState++ = zero;
     }
@@ -339,7 +357,11 @@ static void TroikaAbsorb(Trit *state, unsigned int rate, const Trit *message,
     }
 
     // Apply padding
+//#if SIMD_SIZE!=128
     last_block[trit_idx] = PADDING;
+//#else
+
+//#endif
 
     // Insert last message block
     for (trit_idx = 0; trit_idx < rate; ++trit_idx) {
@@ -408,7 +430,7 @@ int main() {
 
 	importStringToArray(testVector, input);
 	long s = get_microtime();
-	for (int i=0;i<50000/64;i++) {
+	for (int i=0;i<50000/SIMD_SIZE;i++) {
 //		importStringToArray(testVector, input);
 		Troika(result, 243, input, 8019);
 //		printState(0, result, 729);
@@ -417,6 +439,6 @@ int main() {
 	long e = get_microtime();
 	printf("%d\n", (int) ((e-s)/1000));
 
-	printState(0, result, 243);
+	printState(SIMD_SIZE-1, result, 243);
 
 }
