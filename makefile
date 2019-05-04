@@ -1,7 +1,7 @@
 TARGET = troika
 LIBS = -lm
 CC = g++
-CFLAGS = -O3  -Wall
+CFLAGS = -O3 -funroll-all-loops -Wall -mavx
 
 .PHONY: default all clean
 

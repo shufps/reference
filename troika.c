@@ -38,7 +38,9 @@
 #define NUM_SBOXES SLICES*ROWS*COLUMNS/3
 
 //#define PADDING 0x1
-#if SIMD_SIZE==128
+#if SIMD_SIZE==256
+const Trit PADDING={~0, ~0, ~0, ~0};
+#elif SIMD_SIZE==128
 const Trit PADDING={~0, ~0, ~0, ~0};
 #elif SIMD_SIZE==64
 const Trit PADDING={~0ul, ~0ul};
@@ -125,10 +127,19 @@ void PrintTroikaState(uint8_t *state)
 #endif
 
 inline uint8_t simd_exportValue(int nr, Trit* t) {
-#if SIMD_SIZE!=128
+#if SIMD_SIZE!=128 && SIMD_SIZE != 256
 	return ((t->lo >> nr) & 0x1) | ((((t->lo ^ t->hi) >> nr) & 0x1) << 1);
-#else
+#elif SIMD_SIZE == 128
 	return (uint8_t) (_mm_movepi64_pi64(((t->lo >> nr) & 0x1) | ((((t->lo ^ t->hi) >> nr) & 0x1) << 1))[0] & 0xff);
+#else
+	uint64_t tmpLo[4];
+	uint64_t tmpHi[4];
+	_mm256_store_si256((__m256i*) tmpLo, t->lo);
+	_mm256_store_si256((__m256i*) tmpHi, t->hi ^ t->lo);
+
+	uint8_t bitLo = (uint8_t) ((tmpLo[nr / 64] >> (nr % 64)) & 0x1);
+	uint8_t bitHi = (uint8_t) ((tmpHi[nr / 64] >> (nr % 64)) & 0x1);
+	return bitLo | (bitHi << 1);
 #endif
 }
 
@@ -154,24 +165,31 @@ void printState(int nr, Trit* state, int len) {
 }
 
 static inline void simd_expandTrit(uint8_t t, Trit* dst) {
-#if SIMD_SIZE!=128
+#if SIMD_SIZE!=128 && SIMD_SIZE != 256
 	dst->lo = (t & 0x1) ? ~0ul : 0ul;
 	dst->hi = (t & 0x2) ? ~0ul : 0ul;
 	dst->hi = dst->lo ^ dst->hi;
-#else
+#elif SIMD_SIZE == 128
 	dst->lo = (t & 0x1) ? _mm_set1_epi32(0xffffffff) : _mm_set1_epi32(0x00000000);
 	dst->hi = (t & 0x2) ? _mm_set1_epi32(0xffffffff) : _mm_set1_epi32(0x00000000);
+	dst->hi = dst->lo ^ dst->hi;
+#else
+	dst->lo = (t & 0x1) ? _mm256_set1_epi32(0xffffffff) : _mm256_set1_epi32(0x00000000);
+	dst->hi = (t & 0x2) ? _mm256_set1_epi32(0xffffffff) : _mm256_set1_epi32(0x00000000);
 	dst->hi = dst->lo ^ dst->hi;
 #endif
 }
 
 static inline void simd_set_zero(Trit* a) {
-#if SIMD_SIZE != 128
+#if SIMD_SIZE != 128 && SIMD_SIZE != 256
 	a->lo = 0;
 	a->hi = 0;
-#else
+#elif SIMD_SIZE == 128
 	a->lo = _mm_set1_epi32(0u);
 	a->hi = _mm_set1_epi32(0u);
+#else
+	a->lo = _mm256_set1_epi32(0u);
+	a->hi = _mm256_set1_epi32(0u);
 #endif
 }
 
