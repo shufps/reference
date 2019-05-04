@@ -1,4 +1,4 @@
-Changed Troika for SIMD calculations. Calculates 32 or 64 hashs in parallel.
+Changed Troika for SIMD calculations. Calculates 32, 64, 128 (SSE) or 256 (AVX) hashs in parallel.
 
 
 Original README:
