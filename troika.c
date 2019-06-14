@@ -30,25 +30,8 @@
 
 #include <sys/time.h>
 
-#define COLUMNS 9
-#define ROWS 3
-#define SLICES 27
-#define SLICESIZE COLUMNS*ROWS
-#define STATESIZE COLUMNS*ROWS*SLICES
-#define NUM_SBOXES SLICES*ROWS*COLUMNS/3
-
-//#define PADDING 0x1
-#if SIMD_SIZE==256
-const Trit PADDING={~0, ~0, ~0, ~0};
-#elif SIMD_SIZE==128
-const Trit PADDING={~0, ~0, ~0, ~0};
-#elif SIMD_SIZE==64
-const Trit PADDING={~0ul, ~0ul};
-#elif SIMD_SIZE==32
-const Trit PADDING={~0, ~0};
-#endif
-
-static Trit simd_round_constants[NUM_ROUNDS][COLUMNS*SLICES];
+static SIMD_Trit simd_round_constants[NUM_ROUNDS][COLUMNS*SLICES];
+static SIMD_Trit PADDING;
 
 uint16_t perm[729];
 uint16_t plutLeft[243];
@@ -126,10 +109,10 @@ void PrintTroikaState(uint8_t *state)
 #define inline
 #endif
 
-inline uint8_t simd_exportValue(int nr, Trit* t) {
+inline uint8_t simd_exportValue(int nr, SIMD_Trit* t) {
 #if SIMD_SIZE!=128 && SIMD_SIZE != 256
 	return ((t->lo >> nr) & 0x1) | ((((t->lo ^ t->hi) >> nr) & 0x1) << 1);
-#elif SIMD_SIZE == 128
+#elif SIMD_SIZE == 128 // TODO: this probably is wrong
 	return (uint8_t) (_mm_movepi64_pi64(((t->lo >> nr) & 0x1) | ((((t->lo ^ t->hi) >> nr) & 0x1) << 1))[0] & 0xff);
 #else
 	uint64_t tmpLo[4];
@@ -143,13 +126,13 @@ inline uint8_t simd_exportValue(int nr, Trit* t) {
 #endif
 }
 
-void simd_exportState(int nr, Trit* state, uint8_t* trits) {
+void simd_exportState(int nr, SIMD_Trit* state, uint8_t* trits) {
 	for (int i=0;i<729;i++) {
 		*trits++ = simd_exportValue(nr, state++);
 	}
 }
 
-void printState(int nr, Trit* state, int len) {
+void printState(int nr, SIMD_Trit* state, int len) {
 	uint8_t trits[729];
 	simd_exportState(nr, state, trits);
 	for (int i = 0; i < len; i++) {
@@ -164,7 +147,7 @@ void printState(int nr, Trit* state, int len) {
 	printf("\n");
 }
 
-static inline void simd_expandTrit(uint8_t t, Trit* dst) {
+static inline void simd_expandTrit(uint8_t t, SIMD_Trit* dst) {
 #if SIMD_SIZE!=128 && SIMD_SIZE != 256
 	dst->lo = (t & 0x1) ? ~0ul : 0ul;
 	dst->hi = (t & 0x2) ? ~0ul : 0ul;
@@ -180,7 +163,7 @@ static inline void simd_expandTrit(uint8_t t, Trit* dst) {
 #endif
 }
 
-static inline void simd_set_zero(Trit* a) {
+static inline void simd_set_zero(SIMD_Trit* a) {
 #if SIMD_SIZE != 128 && SIMD_SIZE != 256
 	a->lo = 0;
 	a->hi = 0;
@@ -193,8 +176,8 @@ static inline void simd_set_zero(Trit* a) {
 #endif
 }
 
-static inline Trit* simd_add_mod3(Trit* a, Trit* b, Trit* c) {
-	Trit tmp;
+static inline SIMD_Trit* simd_add_mod3(SIMD_Trit* a, SIMD_Trit* b, SIMD_Trit* c) {
+	SIMD_Trit tmp;
 	tmp.hi = ((a->hi ^ b->hi)) | ((a->hi ^ a->lo ^ b->lo));
 	tmp.lo = ((b->lo & ~a->hi)) | ((a->lo ^ b->hi) & (a->hi & ~b->lo));
 	c->hi = tmp.hi;
@@ -202,8 +185,8 @@ static inline Trit* simd_add_mod3(Trit* a, Trit* b, Trit* c) {
 	return c;
 }
 
-static inline void simd_sbox(Trit* a, Trit* b, Trit* c) {
-	Trit d2, d1, d0;
+static inline void simd_sbox(SIMD_Trit* a, SIMD_Trit* b, SIMD_Trit* c) {
+	SIMD_Trit d2, d1, d0;
 	d2.hi = ((b->hi & c->hi)) | ((c->hi & ~a->lo)) | ((a->lo ^ c->hi) & (b->hi));
 	d2.lo = ((a->lo ^ b->lo) & (b->hi & c->hi)) | ((c->hi ^ c->lo) & (~a->hi & ~b->hi)) | ((a->lo ^ b->hi ^ b->lo ^ c->hi) & (a->hi & c->lo)) | ((a->lo ^ c->hi) & (b->lo));
 	d1.hi = (~(a->hi ^ b->lo ^ c->lo) & (~a->lo)) | ((a->hi ^ b->lo ^ c->hi ^ c->lo) & (~a->lo)) | ((b->hi ^ c->hi) & (~a->lo)) | (~(a->lo ^ c->hi) & (b->hi));
@@ -216,40 +199,40 @@ static inline void simd_sbox(Trit* a, Trit* b, Trit* c) {
 }
 
 
-void SubTrytes(Trit *state)
+void SubTrytes(TROIKA_CTX* ctx)
 {
     for (int i=0;i<729;i+=9) {
-    	simd_sbox(&state[i], &state[i+1], &state[i+2]);
-    	simd_sbox(&state[i+3], &state[i+4], &state[i+5]);
-    	simd_sbox(&state[i+6], &state[i+7], &state[i+8]);
+    	simd_sbox(&ctx->state[i], &ctx->state[i+1], &ctx->state[i+2]);
+    	simd_sbox(&ctx->state[i+3], &ctx->state[i+4], &ctx->state[i+5]);
+    	simd_sbox(&ctx->state[i+6], &ctx->state[i+7], &ctx->state[i+8]);
     }
 }
 
-void ShiftRowsAndLanes(Trit *state)
+void ShiftRowsAndLanes(TROIKA_CTX* ctx)
 {
-    Trit newstate[729];
+    SIMD_Trit newstate[729];
     for (int i=0;i<729;i++) {
-		newstate[i] = state[perm[i]];
+		newstate[i] = ctx->state[perm[i]];
     }
-    memcpy(state, newstate, sizeof(newstate));
+    memcpy(ctx->state, newstate, sizeof(newstate));
 }
 
 
 
-void AddColumnParity(Trit *state)
+void AddColumnParity(TROIKA_CTX* ctx)
 {
     int slice,  col;
 
-    Trit parity[SLICES * COLUMNS];
+    SIMD_Trit parity[SLICES * COLUMNS];
 
     int pIdx = 0;
     int sIdx = 0;
     for (slice = 0;slice<SLICES;slice++) {
     	for (col=0;col<COLUMNS;col++, pIdx++, sIdx++) {
-    		Trit col_sum_mod3;
-    		col_sum_mod3 = state[sIdx];
-    		simd_add_mod3(&state[sIdx + 9], &col_sum_mod3, &col_sum_mod3);
-    		simd_add_mod3(&state[sIdx + 18], &col_sum_mod3, &col_sum_mod3);
+    		SIMD_Trit col_sum_mod3;
+    		col_sum_mod3 = ctx->state[sIdx];
+    		simd_add_mod3(&ctx->state[sIdx + 9], &col_sum_mod3, &col_sum_mod3);
+    		simd_add_mod3(&ctx->state[sIdx + 18], &col_sum_mod3, &col_sum_mod3);
     		parity[pIdx] = col_sum_mod3;
     	}
     	sIdx += 18;
@@ -260,24 +243,24 @@ void AddColumnParity(Trit *state)
     // Add parity
     for (slice = 0; slice < SLICES; ++slice) {
 		for (col = 0; col < COLUMNS; ++col, sIdx++, pIdx++) {
-			simd_add_mod3(&state[sIdx], &parity[plutLeft[pIdx]], &state[sIdx]);
-			simd_add_mod3(&state[sIdx], &parity[plutRight[pIdx]], &state[sIdx]);
-			simd_add_mod3(&state[sIdx+9], &parity[plutLeft[pIdx]], &state[sIdx+9]);
-			simd_add_mod3(&state[sIdx+9], &parity[plutRight[pIdx]], &state[sIdx+9]);
-			simd_add_mod3(&state[sIdx+18], &parity[plutLeft[pIdx]], &state[sIdx+18]);
-			simd_add_mod3(&state[sIdx+18], &parity[plutRight[pIdx]], &state[sIdx+18]);
+			simd_add_mod3(&ctx->state[sIdx], &parity[plutLeft[pIdx]], &ctx->state[sIdx]);
+			simd_add_mod3(&ctx->state[sIdx], &parity[plutRight[pIdx]], &ctx->state[sIdx]);
+			simd_add_mod3(&ctx->state[sIdx+9], &parity[plutLeft[pIdx]], &ctx->state[sIdx+9]);
+			simd_add_mod3(&ctx->state[sIdx+9], &parity[plutRight[pIdx]], &ctx->state[sIdx+9]);
+			simd_add_mod3(&ctx->state[sIdx+18], &parity[plutLeft[pIdx]], &ctx->state[sIdx+18]);
+			simd_add_mod3(&ctx->state[sIdx+18], &parity[plutRight[pIdx]], &ctx->state[sIdx+18]);
 		}
 		sIdx+=18;
     }
 }
 
-void AddRoundConstant(Trit *state, int round)
+void AddRoundConstant(TROIKA_CTX* ctx, int round)
 {
     int slice, col, idx;
     for (slice = 0; slice < SLICES; ++slice) {
         for (col = 0; col < COLUMNS; ++col) {
             idx = SLICESIZE*slice + col;
-			simd_add_mod3(&state[idx], &simd_round_constants[round][slice*COLUMNS + col], &state[idx]);
+			simd_add_mod3(&ctx->state[idx], &simd_round_constants[round][slice*COLUMNS + col], &ctx->state[idx]);
         }
     }
 }
@@ -321,9 +304,11 @@ void initConstants() {
 			simd_expandTrit(val, &simd_round_constants[n][i]);
 		}
 	}
+
+	simd_expandTrit(1, &PADDING);
 }
 
-void TroikaPermutation(Trit *state, unsigned long long num_rounds)
+void TroikaPermutation(TROIKA_CTX* ctx, unsigned long long num_rounds)
 {
     unsigned long long round;
 
@@ -331,20 +316,20 @@ void TroikaPermutation(Trit *state, unsigned long long num_rounds)
 
     //PrintTroikaState(state);
     for (round = 0; round < num_rounds; round++) {
-//        printState(0, state, 729);
-        SubTrytes(state);
-//        printState(0, state, 729);
-        ShiftRowsAndLanes(state);
-//        printState(0, state, 729);
-        AddColumnParity(state);
-//        printState(0, state, 729);
-        AddRoundConstant(state, round);
-//        printState(0, state, 729);
+//        printState(0, state->state, 729);
+        SubTrytes(ctx);
+//        printState(0, state->state, 729);
+        ShiftRowsAndLanes(ctx);
+//        printState(0, state->state, 729);
+        AddColumnParity(ctx);
+//        printState(0, state->state, 729);
+        AddRoundConstant(ctx, round);
+//        printState(0, state->state, 729);
     }
     //PrintTroikaState(state);
 }
 
-static void TroikaAbsorb(Trit *state, unsigned int rate, const Trit *message,
+static void TroikaAbsorb(TROIKA_CTX* ctx, unsigned int rate, const SIMD_Trit *message,
                          unsigned long long message_length,
                          unsigned long long num_rounds)
 {
@@ -353,15 +338,15 @@ static void TroikaAbsorb(Trit *state, unsigned int rate, const Trit *message,
     while (message_length >= rate) {
         // Copy message block over the state
         for (trit_idx = 0; trit_idx < rate; ++trit_idx) {
-            state[trit_idx] = message[trit_idx];
+            ctx->state[trit_idx] = message[trit_idx];
         }
-        TroikaPermutation(state, num_rounds);
+        TroikaPermutation(ctx, num_rounds);
         message_length -= rate;
         message += rate;
     }
 
     // Pad last block
-    Trit last_block[rate];
+    SIMD_Trit last_block[rate];
 //    memset(last_block, 0, rate);
     for (unsigned int i=0;i<rate;i++) {
     	simd_set_zero(&last_block[i]);
@@ -375,28 +360,24 @@ static void TroikaAbsorb(Trit *state, unsigned int rate, const Trit *message,
     }
 
     // Apply padding
-//#if SIMD_SIZE!=128
     last_block[trit_idx] = PADDING;
-//#else
-
-//#endif
 
     // Insert last message block
     for (trit_idx = 0; trit_idx < rate; ++trit_idx) {
-        state[trit_idx] = last_block[trit_idx];
+        ctx->state[trit_idx] = last_block[trit_idx];
     }
 }
 
-static void TroikaSqueeze(Trit *hash, unsigned long long hash_length,
-                          unsigned int rate, Trit *state,
+static void TroikaSqueeze(SIMD_Trit* hash, unsigned long long hash_length,
+                          unsigned int rate, TROIKA_CTX* ctx,
                           unsigned long long num_rounds)
 {
     unsigned long long trit_idx;
     while (hash_length >= rate) {
-        TroikaPermutation(state, num_rounds);
+        TroikaPermutation(ctx, num_rounds);
         // Extract rate output
         for (trit_idx = 0; trit_idx < rate; ++trit_idx) {
-            hash[trit_idx] = state[trit_idx];
+            hash[trit_idx] = ctx->state[trit_idx];
         }
         hash += rate;
         hash_length -= rate;
@@ -404,35 +385,35 @@ static void TroikaSqueeze(Trit *hash, unsigned long long hash_length,
 
     // Check if there is a last incomplete block
     if (hash_length % rate) {
-        TroikaPermutation(state, num_rounds);
+        TroikaPermutation(ctx, num_rounds);
         for (trit_idx = 0; trit_idx < hash_length; ++trit_idx) {
-            hash[trit_idx] = state[trit_idx];
+            hash[trit_idx] = ctx->state[trit_idx];
         }
     }
 }                    
 
-void Troika(Trit *out, unsigned long long outlen,
-            const Trit *in, unsigned long long inlen)
+void Troika(SIMD_Trit *out, unsigned long long outlen,
+            const SIMD_Trit *in, unsigned long long inlen)
 {
     TroikaVarRounds(out, outlen, in, inlen, NUM_ROUNDS);
 }
 
-void TroikaVarRounds(Trit *out, unsigned long long outlen,
-                     const Trit *in, unsigned long long inlen,
+void TroikaVarRounds(SIMD_Trit *out, unsigned long long outlen,
+                     const SIMD_Trit *in, unsigned long long inlen,
                      unsigned long long num_rounds)
 {
-    Trit state[STATESIZE] __attribute__ ((aligned (16)));
+	TROIKA_CTX state __attribute__ ((aligned (16)));	// alignment important
 
-    memset(state, 0, sizeof(state));
-    TroikaAbsorb(state, TROIKA_RATE, in, inlen, num_rounds);
-    TroikaSqueeze(out, outlen, TROIKA_RATE, state, num_rounds);
+    memset(&state, 0, sizeof(TROIKA_CTX));
+    TroikaAbsorb(&state, TROIKA_RATE, in, inlen, num_rounds);
+    TroikaSqueeze(out, outlen, TROIKA_RATE, &state, num_rounds);
 }
 
 const char* testVectorResult="100201212212122220110122122111212210022100201102210102201020101211220110102000220002111001021000201212121010120122110101122021221110022000120010102120222202002101112222111011122001222221101010122202121211111101210020221221021020100022202101112";
 const char* testVector="100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002";
 
-void importStringToArray(const char* input, Trit* output) {
-	memset(output, 0, 729);
+void importStringToArray(const char* input, SIMD_Trit* output) {
+	memset(output, 0, 243);
 	for (int i=0;i<243;i++) {
 		simd_expandTrit(*input++ - 48, output++);
 	}
@@ -442,8 +423,8 @@ void importStringToArray(const char* input, Trit* output) {
 
 int main() {
 	initConstants();
-	Trit input[8019]={0};
-	Trit result[729]={0};
+	SIMD_Trit input[8019]={0};
+	SIMD_Trit result[729]={0};
 
 
 	importStringToArray(testVector, input);
