@@ -22,14 +22,55 @@
  * SOFTWARE.
  */
 
-#ifndef TROIKA_H
-#define TROIKA_H
+#ifndef STROIKA_H
+#define STROIKA_H
 
-typedef unsigned char Trit; /* Stores 0,1,2 in a byte. */
-typedef unsigned char Tryte; /* Stores 0,...,26 in a byte. */
+#include <stdint.h>
+
+#define COLUMNS 9
+#define ROWS 3
+#define SLICES 27
+#define SLICESIZE COLUMNS*ROWS
+#define STATESIZE COLUMNS*ROWS*SLICES
+#define NUM_SBOXES SLICES*ROWS*COLUMNS/3
+
+//typedef unsigned char Trit; /* Stores 0,1,2 in a byte. */
+//typedef unsigned char Tryte; /* Stores 0,...,26 in a byte. */
 
 #define NUM_ROUNDS 24
 #define TROIKA_RATE 243
+
+#define SIMD_SIZE 128
+
+// simd-datetype for calculations
+#if SIMD_SIZE == 256
+#include <immintrin.h>
+#define SIMD_T __m256i
+#elif SIMD_SIZE == 128
+#include <xmmintrin.h>
+#define SIMD_T	__m128i
+#elif SIMD_SIZE == 64
+#define SIMD_T	uint64_t
+#elif SIMD_SIZE == 32
+#define SIMD_T uint32_t
+#endif
+
+typedef struct {
+	SIMD_T hi;
+	SIMD_T lo;
+} SIMD_Trit;
+
+typedef struct
+{
+	// hashing state
+	SIMD_Trit state[STATESIZE];
+	// buffer for leftovers TODO not used yet
+	SIMD_Trit message[TROIKA_RATE];
+	// count of bytes in the message[] buffer
+	unsigned rest;
+/*	// size of a message block processed at once
+	unsigned block_size;*/
+} TROIKA_CTX;
 
 /*
  * Evaluates the Troika hash function on the input.
@@ -40,8 +81,8 @@ typedef unsigned char Tryte; /* Stores 0,...,26 in a byte. */
  * @param inlen  Length of the input buffer in trits.
  *
  */
-void Troika(Trit *out, unsigned long long outlen,
-            const Trit *in, unsigned long long inlen);
+void STroika(SIMD_Trit *out, unsigned long long outlen,
+            const SIMD_Trit *in, unsigned long long inlen);
 
 /*
  * Evaluates the Troika hash function on the input with a variable
@@ -54,23 +95,19 @@ void Troika(Trit *out, unsigned long long outlen,
  * @param rounds Number of rounds used for the permutation.
  *
  */
-void TroikaVarRounds(Trit *out, unsigned long long outlen,
-                     const Trit *in, unsigned long long inlen,
+void STroikaVarRounds(SIMD_Trit *out, unsigned long long outlen,
+                     const SIMD_Trit *in, unsigned long long inlen,
                      unsigned long long num_rounds);
-/*
- * Prints the state in a nice format.
- *
- * @param state Pointer to the state which is printed.
- */
-void PrintTroikaSlice(Trit *state, int slice);
-void PrintTroikaState(Trit *state);
-
-void SubTrytes(Trit *state);
-void ShiftRows(Trit *state);
-void ShiftLanes(Trit *state);
-void AddColumnParity(Trit *state);
-void AddRoundConstant(Trit *state, int round);
-void TroikaPermutation(Trit *state, unsigned long long num_rounds);
 
 
+void STroikaAbsorb(TROIKA_CTX* ctx, unsigned int rate, const SIMD_Trit *message,
+                         uint64_t message_length,
+                         unsigned long long num_rounds);
+
+
+void STroikaSqueeze(SIMD_Trit* hash, unsigned long long hash_length,
+                          unsigned int rate, TROIKA_CTX* ctx,
+                          unsigned long long num_rounds);
+
+void STroikaInit();
 #endif

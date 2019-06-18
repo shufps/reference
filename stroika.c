@@ -26,19 +26,18 @@
 #include <stdio.h>
 #include <assert.h>
 
-#include "troika.h"
+#include "stroika.h"
 
+#include <sys/time.h>
 
-#define COLUMNS 9
-#define ROWS 3
-#define SLICES 27
-#define SLICESIZE COLUMNS*ROWS
-#define STATESIZE COLUMNS*ROWS*SLICES
-#define NUM_SBOXES SLICES*ROWS*COLUMNS/3
+static SIMD_Trit simd_round_constants[NUM_ROUNDS][COLUMNS*SLICES];
+static SIMD_Trit PADDING;
 
-#define PADDING 0x1
+uint16_t perm[729];
+uint16_t plutLeft[243];
+uint16_t plutRight[243];
 
-static const Trit round_constants[NUM_ROUNDS][COLUMNS*SLICES] = {
+static const uint8_t round_constants[NUM_ROUNDS][COLUMNS*SLICES] = {
  {2, 2, 2, 2, 1, 2, 0, 1, 0, 1, 1, 0, 2, 0, 1, 0, 1, 1, 0, 0, 1, 2, 1, 1, 1, 0, 0, 2, 0, 2, 1, 0, 2, 2, 2, 1, 0, 2, 2, 0, 0, 1, 2, 2, 1, 0, 1, 0, 1, 2, 2, 2, 0, 1, 2, 2, 1, 1, 2, 1, 1, 2, 0, 2, 0, 2, 0, 0, 0, 0, 2, 1, 1, 2, 1, 0, 1, 0, 2, 1, 1, 0, 0, 2, 2, 2, 2, 0, 1, 1, 2, 1, 2, 2, 0, 1, 2, 2, 2, 0, 1, 0, 2, 2, 0, 2, 1, 1, 2, 1, 2, 1, 0, 0, 2, 1, 0, 0, 1, 2, 2, 1, 1, 1, 0, 1, 0, 2, 2, 0, 2, 2, 2, 0, 2, 2, 1, 0, 0, 0, 2, 1, 0, 0, 1, 1, 1, 2, 2, 1, 0, 1, 0, 1, 1, 1, 1, 0, 1, 2, 2, 1, 0, 1, 0, 2, 0, 1, 2, 0, 1, 2, 2, 2, 2, 1, 0, 0, 0, 0, 2, 1, 0, 2, 1, 1, 2, 0, 2, 1, 0, 0, 0, 1, 0, 2, 1, 2, 0, 1, 2, 1, 0, 2, 0, 2, 1, 0, 0, 1, 2, 0, 2, 2, 2, 0, 1, 0, 2, 0, 1, 0, 2, 1, 2, 1, 2, 2, 1, 1, 2, 0, 2, 2, 1, 0, 0, 2, 0, 2, 1, 0, 1},
  {1, 1, 1, 0, 2, 2, 0, 2, 0, 1, 0, 2, 1, 1, 0, 0, 1, 1, 1, 2, 0, 1, 1, 2, 0, 1, 1, 1, 2, 0, 2, 2, 2, 0, 2, 1, 1, 2, 1, 0, 2, 1, 0, 2, 1, 0, 0, 2, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0, 0, 0, 1, 1, 0, 2, 0, 0, 0, 2, 1, 1, 0, 1, 2, 0, 1, 2, 1, 1, 1, 0, 1, 0, 0, 0, 1, 0, 2, 2, 0, 2, 0, 2, 1, 0, 2, 1, 0, 0, 1, 2, 2, 0, 0, 0, 0, 1, 0, 2, 2, 2, 1, 1, 0, 1, 0, 2, 1, 2, 2, 2, 1, 0, 2, 2, 0, 2, 0, 1, 2, 1, 0, 1, 0, 0, 1, 1, 0, 1, 2, 2, 2, 0, 0, 1, 0, 0, 1, 2, 1, 1, 1, 2, 0, 0, 0, 2, 1, 0, 2, 1, 2, 2, 1, 2, 1, 0, 0, 0, 2, 0, 0, 0, 2, 2, 1, 2, 2, 0, 0, 1, 2, 2, 1, 0, 0, 2, 1, 2, 2, 2, 0, 1, 1, 1, 1, 2, 0, 1, 1, 2, 2, 1, 0, 1, 2, 0, 2, 2, 1, 0, 1, 2, 1, 0, 1, 0, 1, 1, 2, 1, 1, 2, 2, 2, 1, 0, 2, 0, 0, 0, 1, 1, 2, 1, 0, 2, 0, 1, 1, 1, 2},
  {0, 2, 0, 2, 1, 2, 1, 1, 2, 1, 1, 2, 2, 2, 2, 0, 0, 0, 0, 0, 1, 1, 0, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 1, 2, 2, 0, 1, 0, 2, 2, 1, 2, 2, 2, 2, 1, 2, 1, 1, 0, 0, 1, 0, 2, 0, 2, 0, 1, 2, 0, 0, 2, 2, 2, 1, 1, 0, 0, 2, 0, 2, 2, 2, 2, 1, 2, 1, 0, 2, 0, 2, 0, 2, 0, 2, 2, 0, 2, 2, 1, 2, 1, 2, 0, 0, 0, 0, 1, 0, 2, 1, 1, 2, 1, 0, 1, 0, 2, 0, 1, 0, 0, 2, 2, 2, 2, 2, 1, 1, 0, 1, 2, 2, 0, 0, 2, 2, 1, 0, 1, 2, 2, 1, 0, 2, 1, 1, 2, 1, 2, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 2, 0, 2, 0, 0, 1, 0, 0, 1, 0, 2, 1, 0, 2, 0, 0, 0, 0, 2, 0, 0, 0, 2, 0, 1, 0, 2, 0, 0, 1, 2, 0, 1, 1, 2, 2, 0, 2, 2, 0, 0, 2, 2, 1, 2, 0, 0, 0, 1, 0, 2, 1, 0, 1, 2, 1, 1, 0, 2, 0, 0, 2, 1, 1, 0, 1, 1, 2, 0, 0, 1, 1, 1, 0, 0, 2, 2, 2, 2, 1, 1, 2, 2},
@@ -64,18 +63,24 @@ static const Trit round_constants[NUM_ROUNDS][COLUMNS*SLICES] = {
  {0, 0, 2, 2, 1, 1, 1, 0, 1, 2, 2, 2, 1, 2, 2, 2, 0, 1, 2, 1, 2, 0, 0, 1, 1, 2, 0, 1, 1, 1, 2, 2, 1, 2, 2, 0, 2, 1, 1, 1, 0, 0, 0, 2, 0, 2, 1, 2, 2, 2, 2, 2, 0, 2, 2, 2, 0, 1, 0, 0, 1, 0, 0, 2, 1, 2, 1, 0, 0, 0, 0, 1, 1, 2, 2, 2, 1, 2, 0, 1, 1, 2, 1, 1, 2, 0, 1, 0, 2, 2, 0, 0, 0, 2, 0, 1, 2, 1, 0, 1, 1, 2, 0, 1, 0, 1, 2, 2, 0, 2, 2, 0, 1, 1, 1, 2, 2, 0, 0, 0, 2, 2, 1, 1, 1, 2, 1, 1, 2, 2, 1, 2, 2, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1, 1, 2, 1, 0, 0, 2, 0, 1, 1, 2, 0, 2, 1, 1, 0, 1, 2, 2, 2, 1, 2, 1, 1, 0, 1, 2, 1, 2, 0, 2, 0, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 0, 0, 0, 0, 0, 2, 0, 2, 0, 2, 0, 0, 0, 2, 0, 2, 1, 2, 1, 0, 1, 2, 0, 2, 2, 2, 2, 2, 2, 1, 0, 1, 0, 2, 0, 0, 0, 2, 1, 2, 2, 2, 2, 0, 1, 2, 1, 2, 0, 1, 0, 1, 2, 0, 1},
  {1, 1, 0, 1, 1, 1, 0, 0, 2, 1, 2, 0, 0, 1, 2, 2, 1, 1, 2, 1, 2, 2, 2, 2, 0, 2, 0, 0, 1, 0, 1, 0, 1, 0, 1, 0, 2, 0, 1, 2, 1, 2, 1, 2, 2, 2, 1, 0, 1, 1, 2, 1, 0, 1, 2, 1, 2, 0, 2, 0, 2, 2, 1, 1, 1, 1, 1, 1, 2, 0, 1, 2, 2, 0, 0, 0, 1, 2, 0, 0, 2, 2, 1, 1, 1, 2, 0, 2, 0, 2, 1, 2, 2, 1, 2, 1, 1, 2, 2, 2, 0, 0, 0, 2, 0, 0, 1, 1, 1, 1, 1, 2, 0, 0, 2, 1, 1, 0, 0, 1, 2, 2, 0, 1, 1, 1, 2, 0, 2, 2, 2, 2, 2, 1, 1, 2, 1, 0, 2, 0, 0, 2, 2, 0, 0, 2, 0, 2, 0, 0, 2, 0, 1, 0, 0, 2, 1, 0, 0, 0, 1, 1, 0, 1, 1, 0, 1, 2, 1, 1, 0, 0, 0, 0, 0, 1, 1, 0, 1, 2, 2, 0, 0, 1, 1, 0, 0, 1, 2, 2, 1, 2, 1, 0, 2, 0, 2, 2, 0, 0, 2, 2, 0, 2, 2, 0, 0, 1, 0, 2, 0, 0, 0, 0, 1, 2, 0, 2, 2, 0, 1, 0, 1, 2, 0, 1, 0, 0, 2, 1, 1, 1, 0, 0, 1, 0, 1, 1, 1, 2, 2, 2, 0},
 };
-
-static const int sbox_lookup[27] = {6, 25, 17, 5, 15, 10, 4, 20, 24,
+/*
+static const int sbox_lookup[27] = {6, 25, 17, 5, 15, 10, 4, 20, 24, 
                                     0, 1, 2, 9, 22, 26, 18, 16, 14,
                                     3, 13, 23, 7, 11, 12, 8, 21, 19};
-
+*/
 static const int shift_rows_param[3] = {0, 1, 2};
 
-static const int shift_lanes_param[27] = {19, 13, 21, 10, 24, 15, 2, 9, 3,
-                                          14, 0, 6, 5, 1, 25, 22, 23, 20,
+static const int shift_lanes_param[27] = {19, 13, 21, 10, 24, 15, 2, 9, 3, 
+                                          14, 0, 6, 5, 1, 25, 22, 23, 20, 
                                           7, 17, 26, 12, 8, 18, 16, 11, 4};
 
-void PrintTroikaSlice(Trit *state, int slice)
+static long get_microtime(){
+    struct timeval t;
+    gettimeofday(&t, NULL);
+    return t.tv_sec * (int)1e6 + t.tv_usec;
+}
+
+/*void PrintTroikaSlice(uint8_t *state, int slice)
 {
 	fprintf(stderr, "#### Slice %i ####\n", slice);
 	for (int row = 0; row < ROWS; ++row) {
@@ -91,7 +96,7 @@ void PrintTroikaSlice(Trit *state, int slice)
 	fprintf(stderr, "\n");
 }
 
-void PrintTroikaState(Trit *state)
+void PrintTroikaState(uint8_t *state)
 {
     //fprintf(stderr, "Troika State:\n");
 
@@ -99,109 +104,244 @@ void PrintTroikaState(Trit *state)
 		PrintTroikaSlice(state, slice);
     }
 }
+*/
+#ifdef DEBUG
+#define inline
+#endif
 
-void SubTrytes(Trit *state)
+inline uint8_t simd_exportValue(int nr, SIMD_Trit* t) {
+#if SIMD_SIZE!=128 && SIMD_SIZE != 256
+	return ((t->lo >> nr) & 0x1) | ((((t->lo ^ t->hi) >> nr) & 0x1) << 1);
+#elif SIMD_SIZE == 128 // TODO: this probably is wrong
+	uint64_t tmpLo[2];
+	uint64_t tmpHi[2];
+	_mm_store_si128((__m128i*) tmpLo, t->lo);
+	_mm_store_si128((__m128i*) tmpHi, t->hi ^ t->lo);
+	uint8_t bitLo = (uint8_t) ((tmpLo[nr / 64] >> (nr % 64)) & 0x1);
+	uint8_t bitHi = (uint8_t) ((tmpHi[nr / 64] >> (nr % 64)) & 0x1);
+	return bitLo | (bitHi << 1);
+#else
+	uint64_t tmpLo[4];
+	uint64_t tmpHi[4];
+	_mm256_store_si256((__m256i*) tmpLo, t->lo);
+	_mm256_store_si256((__m256i*) tmpHi, t->hi ^ t->lo);
+
+	uint8_t bitLo = (uint8_t) ((tmpLo[nr / 64] >> (nr % 64)) & 0x1);
+	uint8_t bitHi = (uint8_t) ((tmpHi[nr / 64] >> (nr % 64)) & 0x1);
+	return bitLo | (bitHi << 1);
+#endif
+}
+
+void simd_exportState(int nr, SIMD_Trit* state, uint8_t* trits, int len) {
+	for (int i=0;i<len;i++) {
+		*trits++ = simd_exportValue(nr, state++);
+	}
+}
+
+void printState(int nr, SIMD_Trit* state, int len) {
+	uint8_t trits[729];
+	simd_exportState(nr, state, trits, 729);
+	for (int i = 0; i < len; i++) {
+		if (!(i % 27)) {
+			printf("\n");
+		}
+		if (!(i % 9)) {
+			printf(" ");
+		}
+		printf("%d", trits[i]);
+	}
+	printf("\n");
+}
+
+static inline void simd_expandTrit(uint8_t t, SIMD_Trit* dst) {
+#if SIMD_SIZE!=128 && SIMD_SIZE != 256
+	dst->lo = (t & 0x1) ? ~0ul : 0ul;
+	dst->hi = (t & 0x2) ? ~0ul : 0ul;
+	dst->hi = dst->lo ^ dst->hi;
+#elif SIMD_SIZE == 128
+	dst->lo = (t & 0x1) ? _mm_set1_epi32(0xffffffff) : _mm_set1_epi32(0x00000000);
+	dst->hi = (t & 0x2) ? _mm_set1_epi32(0xffffffff) : _mm_set1_epi32(0x00000000);
+	dst->hi = dst->lo ^ dst->hi;
+#else
+	dst->lo = (t & 0x1) ? _mm256_set1_epi32(0xffffffff) : _mm256_set1_epi32(0x00000000);
+	dst->hi = (t & 0x2) ? _mm256_set1_epi32(0xffffffff) : _mm256_set1_epi32(0x00000000);
+	dst->hi = dst->lo ^ dst->hi;
+#endif
+}
+
+
+// insert message into SIMD-registers at specific position
+// uses uint32 for access to data
+void insertMessage(int nr, uint8_t* input, SIMD_Trit* trits, int len) {
+	for (int i=0;i<len;i++) {
+		uint32_t* pLo = (uint32_t*) &trits[i].lo;
+		uint32_t* pHi = (uint32_t*) &trits[i].hi;
+		uint32_t ofs = nr / 32;
+		uint32_t bit = 1 << (nr % 32);
+
+		char lo = input[i] & 0x1;
+		char hi = !!(input[i] & 0x2) ^ lo;
+
+		if (lo)
+			pLo[ofs] |= bit;
+		else
+			pLo[ofs] &= ~bit;
+
+		if (hi)
+			pHi[ofs] |= bit;
+		else
+			pHi[ofs] &= ~bit;
+	}
+}
+
+
+
+static inline void simd_set_zero(SIMD_Trit* a) {
+#if SIMD_SIZE != 128 && SIMD_SIZE != 256
+	a->lo = 0;
+	a->hi = 0;
+#elif SIMD_SIZE == 128
+	a->lo = _mm_set1_epi32(0u);
+	a->hi = _mm_set1_epi32(0u);
+#else
+	a->lo = _mm256_set1_epi32(0u);
+	a->hi = _mm256_set1_epi32(0u);
+#endif
+}
+
+static inline SIMD_Trit* simd_add_mod3(SIMD_Trit* a, SIMD_Trit* b, SIMD_Trit* c) {
+	SIMD_Trit tmp;
+	tmp.hi = ((a->hi ^ b->hi)) | ((a->hi ^ a->lo ^ b->lo));
+	tmp.lo = ((b->lo & ~a->hi)) | ((a->lo ^ b->hi) & (a->hi & ~b->lo));
+	c->hi = tmp.hi;
+	c->lo = tmp.lo;
+	return c;
+}
+
+static inline void simd_sbox(SIMD_Trit* a, SIMD_Trit* b, SIMD_Trit* c) {
+	SIMD_Trit d2, d1, d0;
+	d2.hi = ((b->hi & c->hi)) | ((c->hi & ~a->lo)) | ((a->lo ^ c->hi) & (b->hi));
+	d2.lo = ((a->lo ^ b->lo) & (b->hi & c->hi)) | ((c->hi ^ c->lo) & (~a->hi & ~b->hi)) | ((a->lo ^ b->hi ^ b->lo ^ c->hi) & (a->hi & c->lo)) | ((a->lo ^ c->hi) & (b->lo));
+	d1.hi = (~(a->hi ^ b->lo ^ c->lo) & (~a->lo)) | ((a->hi ^ b->lo ^ c->hi ^ c->lo) & (~a->lo)) | ((b->hi ^ c->hi) & (~a->lo)) | (~(a->lo ^ c->hi) & (b->hi));
+	d1.lo = ((a->hi ^ a->lo) & (~b->hi)) | ((a->hi ^ b->hi) & (~a->lo & ~c->hi)) | ((a->lo ^ b->lo ^ c->lo) & (a->hi & b->hi & c->hi));
+	d0.hi = ((a->hi ^ b->lo ^ c->lo) & (c->hi)) | ((a->hi ^ a->lo ^ b->lo ^ c->lo) & (c->hi)) | ((b->hi ^ c->hi) & (~a->lo));
+	d0.lo = ((a->lo & c->lo)) | (~(a->hi ^ b->lo ^ c->hi) & (b->hi & ~a->lo & ~c->lo)) | ((c->lo & ~b->hi));
+    *a = d2;
+    *b = d1;
+    *c = d0;
+}
+
+
+void SSubTrytes(TROIKA_CTX* ctx)
 {
-    int sbox_idx;
-
-    for (sbox_idx = 0; sbox_idx < NUM_SBOXES; ++sbox_idx) {
-        Tryte sbox_input = 9*state[3*sbox_idx] + 3*state[3*sbox_idx + 1] +
-                         state[3*sbox_idx + 2];
-        Tryte sbox_output = sbox_lookup[sbox_input];
-        state[3*sbox_idx + 2] = sbox_output % 3;
-        sbox_output /= 3;
-        state[3*sbox_idx + 1] = sbox_output % 3;
-        sbox_output /= 3;
-        state[3*sbox_idx]     = sbox_output % 3;
+    for (int i=0;i<729;i+=9) {
+    	simd_sbox(&ctx->state[i], &ctx->state[i+1], &ctx->state[i+2]);
+    	simd_sbox(&ctx->state[i+3], &ctx->state[i+4], &ctx->state[i+5]);
+    	simd_sbox(&ctx->state[i+6], &ctx->state[i+7], &ctx->state[i+8]);
     }
 }
 
-void ShiftRows(Trit *state)
+void SShiftRowsAndLanes(TROIKA_CTX* ctx)
 {
-    int slice, row, col, old_idx, new_idx;
-
-    Trit new_state[STATESIZE];
-
-    for (slice = 0; slice < SLICES; ++slice) {
-        for (row = 0; row < ROWS; ++row) {
-            for (col = 0; col < COLUMNS; ++col) {
-                old_idx = SLICESIZE*slice + COLUMNS*row + col;
-                new_idx = SLICESIZE*slice + COLUMNS*row +
-                          (col + 3*shift_rows_param[row]) % COLUMNS;
-                new_state[new_idx] = state[old_idx];
-            }
-        }
+    SIMD_Trit newstate[729];
+    for (int i=0;i<729;i++) {
+		newstate[i] = ctx->state[perm[i]];
     }
-
-    memcpy(state, new_state, STATESIZE);
+    memcpy(ctx->state, newstate, sizeof(newstate));
 }
 
-void ShiftLanes(Trit *state)
+
+
+void SAddColumnParity(TROIKA_CTX* ctx)
 {
-    int slice, row, col, old_idx, new_idx, new_slice;
+    int slice,  col;
 
-    Trit new_state[STATESIZE];
+    SIMD_Trit parity[SLICES * COLUMNS];
 
-    for (slice = 0; slice < SLICES; ++slice) {
-        for (row = 0; row < ROWS; ++row) {
-            for (col = 0; col < COLUMNS; ++col) {
-                old_idx = SLICESIZE*slice + COLUMNS*row + col;
-                new_slice = (slice + shift_lanes_param[col + COLUMNS*row]) % SLICES;
-                new_idx = SLICESIZE*(new_slice) + COLUMNS*row + col;
-                new_state[new_idx] = state[old_idx];
-            }
-        }
+    int pIdx = 0;
+    int sIdx = 0;
+    for (slice = 0;slice<SLICES;slice++) {
+    	for (col=0;col<COLUMNS;col++, pIdx++, sIdx++) {
+    		SIMD_Trit col_sum_mod3;
+    		col_sum_mod3 = ctx->state[sIdx];
+    		simd_add_mod3(&ctx->state[sIdx + 9], &col_sum_mod3, &col_sum_mod3);
+    		simd_add_mod3(&ctx->state[sIdx + 18], &col_sum_mod3, &col_sum_mod3);
+    		parity[pIdx] = col_sum_mod3;
+    	}
+    	sIdx += 18;
     }
 
-    memcpy(state, new_state, STATESIZE);
-}
-
-void AddColumnParity(Trit *state)
-{
-    int slice, row, col, col_sum, idx, sum_to_add;
-
-    Trit parity[SLICES * COLUMNS];
-
-    // First compute parity for each column
-    for (slice = 0; slice < SLICES; ++slice) {
-        for (col = 0; col < COLUMNS; ++col) {
-            col_sum = 0;
-            for (row = 0; row < ROWS; ++row) {
-                col_sum += state[SLICESIZE*slice + COLUMNS*row + col];
-            }
-            parity[COLUMNS*slice + col] = col_sum % 3;
-        }
-    }
-
+    pIdx = 0;
+    sIdx = 0;
     // Add parity
     for (slice = 0; slice < SLICES; ++slice) {
-        for (row = 0; row < ROWS; ++row) {
-            for (col = 0; col < COLUMNS; ++col) {
-                idx = SLICESIZE*slice + COLUMNS*row + col;
-                sum_to_add = parity[(col - 1 + 9) % 9 + COLUMNS*slice] +
-                             parity[(col + 1) % 9 + COLUMNS*((slice + 1) % SLICES)];
-                state[idx] = (state[idx] + sum_to_add) % 3;
-            }
-        }
+		for (col = 0; col < COLUMNS; ++col, sIdx++, pIdx++) {
+			simd_add_mod3(&ctx->state[sIdx], &parity[plutLeft[pIdx]], &ctx->state[sIdx]);
+			simd_add_mod3(&ctx->state[sIdx], &parity[plutRight[pIdx]], &ctx->state[sIdx]);
+			simd_add_mod3(&ctx->state[sIdx+9], &parity[plutLeft[pIdx]], &ctx->state[sIdx+9]);
+			simd_add_mod3(&ctx->state[sIdx+9], &parity[plutRight[pIdx]], &ctx->state[sIdx+9]);
+			simd_add_mod3(&ctx->state[sIdx+18], &parity[plutLeft[pIdx]], &ctx->state[sIdx+18]);
+			simd_add_mod3(&ctx->state[sIdx+18], &parity[plutRight[pIdx]], &ctx->state[sIdx+18]);
+		}
+		sIdx+=18;
     }
 }
 
-void AddRoundConstant(Trit *state, int round)
+void SAddRoundConstant(TROIKA_CTX* ctx, int round)
 {
     int slice, col, idx;
-
     for (slice = 0; slice < SLICES; ++slice) {
         for (col = 0; col < COLUMNS; ++col) {
             idx = SLICESIZE*slice + col;
-            state[idx] = (state[idx] +
-                          round_constants[round][slice*COLUMNS + col]) % 3;
+			simd_add_mod3(&ctx->state[idx], &simd_round_constants[round][slice*COLUMNS + col], &ctx->state[idx]);
         }
     }
 }
 
 
+void STroikaInit() {
+	uint16_t tmp[729];
+    for (int slice = 0; slice < SLICES; ++slice) {
+        for (int row = 0; row < ROWS; ++row) {
+            for (int col = 0; col < COLUMNS; ++col) {
+                int old_idx = SLICESIZE*slice + COLUMNS*row + col;
+                int new_idx = SLICESIZE*slice + COLUMNS*row +
+                          (col + 3*shift_rows_param[row]) % COLUMNS;
+                tmp[new_idx] = old_idx;
+            }
+        }
+    }
 
-void TroikaPermutation(Trit *state, unsigned long long num_rounds)
+	for (int slice = 0; slice < SLICES; ++slice) {
+		for (int row = 0; row < ROWS; ++row) {
+			for (int col = 0; col < COLUMNS; ++col) {
+				int old_idx = SLICESIZE*slice + COLUMNS*row + col;
+				int new_slice = (slice + shift_lanes_param[col + COLUMNS*row]) % SLICES;
+				int new_idx = SLICESIZE*(new_slice) + COLUMNS*row + col;
+				perm[new_idx] = tmp[old_idx];
+			}
+		}
+	}
+
+    for (int slice = 0; slice < SLICES; ++slice) {
+        for (int row = 0; row < ROWS; ++row) {
+            for (int col = 0; col < COLUMNS; ++col) {
+                plutLeft[COLUMNS*slice + col] = (col - 1 + 9) % 9 + COLUMNS*slice;
+                plutRight[COLUMNS*slice + col] = (col + 1) % 9 + COLUMNS*((slice + 1) % SLICES);
+            }
+        }
+    }
+	for (int n=0;n<24;n++) {
+		for (int i=0;i<243;i++) {
+			uint8_t val = round_constants[n][i];
+			simd_expandTrit(val, &simd_round_constants[n][i]);
+		}
+	}
+
+	simd_expandTrit(1, &PADDING);
+}
+
+void STroikaPermutation(TROIKA_CTX* ctx, unsigned long long num_rounds)
 {
     unsigned long long round;
 
@@ -209,86 +349,91 @@ void TroikaPermutation(Trit *state, unsigned long long num_rounds)
 
     //PrintTroikaState(state);
     for (round = 0; round < num_rounds; round++) {
-        SubTrytes(state);
-        ShiftRows(state);
-        ShiftLanes(state);
-        AddColumnParity(state);
-        AddRoundConstant(state, round);
+//        printState(0, state->state, 729);
+        SSubTrytes(ctx);
+//        printState(0, state->state, 729);
+        SShiftRowsAndLanes(ctx);
+//        printState(0, state->state, 729);
+        SAddColumnParity(ctx);
+//        printState(0, state->state, 729);
+        SAddRoundConstant(ctx, round);
+//        printState(0, state->state, 729);
     }
     //PrintTroikaState(state);
 }
 
-static void TroikaAbsorb(Trit *state, unsigned int rate, const Trit *message,
-                         unsigned long long message_length,
+void STroikaAbsorb(TROIKA_CTX* ctx, unsigned int rate, const SIMD_Trit *message,
+                         uint64_t message_length,
                          unsigned long long num_rounds)
 {
-    unsigned long long trit_idx;
+    unsigned idx = ctx->rest;
+	ctx->rest = (ctx->rest + message_length) % TROIKA_RATE;
+
+	if (idx) {
+		uint64_t left = TROIKA_RATE - idx;
+		// TODO can it be copied to state directly?
+		memcpy(ctx->message + idx, message, (message_length < left ? message_length : left) * sizeof(SIMD_Trit));
+
+		if (message_length < left)
+			return;
+
+		memcpy(ctx->state, ctx->message, TROIKA_RATE * sizeof(SIMD_Trit));
+		STroikaPermutation(ctx, num_rounds);
+		message += left;
+		message_length -= left;
+	}
+
 
     while (message_length >= rate) {
-        // Copy message block over the state
-        for (trit_idx = 0; trit_idx < rate; ++trit_idx) {
-            state[trit_idx] = message[trit_idx];
-        }
-        TroikaPermutation(state, num_rounds);
+		memcpy(ctx->state, message, TROIKA_RATE * sizeof(SIMD_Trit));
+        STroikaPermutation(ctx, num_rounds);
         message_length -= rate;
         message += rate;
     }
-
-    // Pad last block
-    Trit last_block[rate];
-    memset(last_block, 0, rate);
-
-    // Copy over last incomplete message block
-    for (trit_idx = 0; trit_idx < message_length; ++trit_idx) {
-        last_block[trit_idx] = message[trit_idx];
-    }
-
-    // Apply padding
-    last_block[trit_idx] = PADDING;
-
-    // Insert last message block
-    for (trit_idx = 0; trit_idx < rate; ++trit_idx) {
-        state[trit_idx] = last_block[trit_idx];
-    }
+	if (message_length) {
+		memcpy(ctx->message, message, message_length * sizeof(SIMD_Trit));
+	}
 }
 
-static void TroikaSqueeze(Trit *hash, unsigned long long hash_length,
-                          unsigned int rate, Trit *state,
+void STroikaSqueeze(SIMD_Trit* hash, unsigned long long hash_length,
+                          unsigned int rate, TROIKA_CTX* ctx,
                           unsigned long long num_rounds)
 {
-    unsigned long long trit_idx;
+	// Copy over last incomplete message block
+	memcpy(ctx->state, ctx->message, ctx->rest * sizeof(SIMD_Trit));
+	memset(&ctx->state[ctx->rest], 0, (TROIKA_RATE - ctx->rest) * sizeof(SIMD_Trit));
+	ctx->state[ctx->rest] = PADDING;
+
     while (hash_length >= rate) {
-        TroikaPermutation(state, num_rounds);
+        STroikaPermutation(ctx, num_rounds);
         // Extract rate output
-        for (trit_idx = 0; trit_idx < rate; ++trit_idx) {
-            hash[trit_idx] = state[trit_idx];
-        }
+        memcpy(hash, ctx->state, TROIKA_RATE * sizeof(SIMD_Trit));
         hash += rate;
         hash_length -= rate;
     }
 
     // Check if there is a last incomplete block
-    if (hash_length % rate) {
-        TroikaPermutation(state, num_rounds);
-        for (trit_idx = 0; trit_idx < hash_length; ++trit_idx) {
-            hash[trit_idx] = state[trit_idx];
-        }
+    if (hash_length > 0) {
+        STroikaPermutation(ctx, num_rounds);
+        memcpy(hash, ctx->state, hash_length * sizeof(SIMD_Trit));
     }
-}
+}                    
 
-void Troika(Trit *out, unsigned long long outlen,
-            const Trit *in, unsigned long long inlen)
+void STroika(SIMD_Trit *out, unsigned long long outlen,
+            const SIMD_Trit *in, unsigned long long inlen)
 {
-    TroikaVarRounds(out, outlen, in, inlen, NUM_ROUNDS);
+    STroikaVarRounds(out, outlen, in, inlen, NUM_ROUNDS);
 }
 
-void TroikaVarRounds(Trit *out, unsigned long long outlen,
-                     const Trit *in, unsigned long long inlen,
+void STroikaVarRounds(SIMD_Trit *out, unsigned long long outlen,
+                     const SIMD_Trit *in, unsigned long long inlen,
                      unsigned long long num_rounds)
 {
-    Trit state[STATESIZE];
+	TROIKA_CTX state __attribute__ ((aligned (16)));	// alignment important
 
-    memset(state, 0, STATESIZE);
-    TroikaAbsorb(state, TROIKA_RATE, in, inlen, num_rounds);
-    TroikaSqueeze(out, outlen, TROIKA_RATE, state, num_rounds);
+    memset(&state, 0, sizeof(TROIKA_CTX));
+    STroikaAbsorb(&state, TROIKA_RATE, in, inlen, num_rounds);
+    STroikaSqueeze(out, outlen, TROIKA_RATE, &state, num_rounds);
 }
+
+
